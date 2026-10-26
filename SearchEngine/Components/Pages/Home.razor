@@ -1,0 +1,193 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@using MediatR
+@inject IMediator Mediator
+
+<div class="container-fluid py-4">
+    <!-- Page Header -->
+    <div class="row mb-4">
+        <div class="col">
+            <h1 class="h3 fw-bold text-dark mb-1">Forum & Vector Search</h1>
+            <p class="text-muted small mb-0">Semantic text and reverse image similarity search powered by pgvector and
+                embeddings.</p>
+            </div>
+        </div>
+
+        <!-- Actions Row: Search & Post Creation -->
+        <div class="row g-3 mb-4">
+            <!-- Search Panel -->
+            <div class="col-md-6">
+                <div class="card shadow-sm border-0 h-100">
+                    <div class="card-body">
+                        <h5 class="card-title h6 fw-bold mb-3">
+                            <i class="bi bi-search me-1"></i> Semantic & Image Search
+                        </h5>
+                    
+                        <div class="input-group mb-3">
+                            <input @bind="query" @bind:event="oninput" @onkeyup="HandleKeyup" class="form-control"
+                                   placeholder="Search forum posts..." />
+                            <button class="btn btn-primary" @onclick="SearchText">Search</button>
+                        </div>
+
+                        <div class="d-flex align-items-center gap-2">
+                            <label class="btn btn-outline-secondary btn-sm mb-0">
+                                <i class="bi bi-image me-1"></i> Upload Image to Search
+                                <InputFile OnChange="SearchImage" accept="image/*" class="d-none" />
+                            </label>
+                            <button class="btn btn-light btn-sm border" @onclick="Load">Clear / Reset</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Create / Edit Post Panel -->
+            <div class="col-md-6">
+                <div class="card shadow-sm border-0 h-100">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="card-title h6 fw-bold mb-0">
+                                @(editId is null ? "Create New Post" : $"Editing Post #{editId}")
+                            </h5>
+                            @if (editId is not null)
+                            {
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="CancelEdit">Cancel</button>
+                            }
+                        </div>
+
+                        <div class="mb-2">
+                            <input @bind="title" class="form-control form-control-sm" placeholder="Title..." />
+                        </div>
+                        <div class="mb-2">
+                            <textarea @bind="body" class="form-control form-control-sm" rows="2"
+                                      placeholder="Body content..."></textarea>
+                        </div>
+
+                        <div class="d-flex justify-content-between align-items-center mt-3">
+                            <label class="btn btn-outline-secondary btn-sm mb-0">
+                                <i class="bi bi-paperclip me-1"></i> Attach Image
+                                <InputFile OnChange="PickImage" accept="image/*" class="d-none" />
+                            </label>
+                            <button class="btn btn-success btn-sm px-4" @onclick="Save">
+                                @(editId is null ? "Publish" : "Save Changes")
+                            </button>
+                        </div>
+
+                        @if (image is not null)
+                        {
+                            <div class="mt-2 text-muted small"><span class="badge bg-success">Image attached</span> (@imageType)
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Posts Feed Grid -->
+        <div class="row">
+            <div class="col">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h4 class="h5 fw-bold mb-0">Posts Feed</h4>
+                    <span class="badge bg-secondary">@posts.Count loaded</span>
+                </div>
+
+                @if (posts.Count == 0)
+                {
+                    <div class="alert alert-light text-center py-5 border shadow-sm">
+                        <p class="text-muted mb-0">No posts found. Create one above or try a different search query!</p>
+                    </div>
+                }
+
+                <div class="row g-3">
+                    @foreach (var p in posts)
+                    {
+                        <div class="col-md-6 col-lg-4">
+                            <div class="card shadow-sm border-0 h-100">
+                                @if (p.HasImage)
+                                {
+                                    <img src="/posts/@p.Id/image" class="card-img-top object-fit-cover" style="height: 180px;"
+                                         alt="Post image" />
+                                }
+                                <div class="card-body d-flex flex-column">
+                                    <div class="d-flex justify-content-between align-items-start mb-2">
+                                        <h5 class="card-title h6 fw-bold mb-0 text-truncate" title="@p.Title">@p.Title</h5>
+                                        @if (p.Distance is { } d)
+                                        {
+                                            <span class="badge bg-info text-dark font-monospace" title="Cosine Distance">dist:
+                                                @d.ToString("F3")</span>
+                                            }
+                                        </div>
+                                        <p class="card-text text-muted small flex-grow-1">@p.Body</p>
+                                        <div class="d-flex justify-content-end gap-1 mt-3 pt-2 border-top">
+                                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => Edit(p)">Edit</button>
+                                            <button class="btn btn-sm btn-outline-danger"
+                                                    @onclick="() => Delete(p.Id)">Delete</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+
+@code {
+    List<PostDto> posts = [];
+    string? query, title, body, imageType;
+    byte[]? image;
+    int? editId;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    async Task Load() => posts = await Mediator.Send(new GetPosts());
+
+    static async Task<byte[]> Read(IBrowserFile f)
+    {
+        using var ms = new MemoryStream();
+        await f.OpenReadStream(5_000_000).CopyToAsync(ms);
+        return ms.ToArray();
+    }
+
+    async Task PickImage(InputFileChangeEventArgs e)
+    {
+        image = await Read(e.File);
+        imageType = e.File.ContentType;
+    }
+
+    async Task Save()
+    {
+        if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(body))
+            return;
+
+        if (editId is null)
+            await Mediator.Send(new AddPost(title, body, image, imageType));
+        else
+            await Mediator.Send(new UpdatePost(editId.Value, title, body, image, imageType));
+
+        title = body = imageType = null;
+        image = null;
+        editId = null;
+        await Load();
+    }
+
+    void Edit(PostDto p) { editId = p.Id; title = p.Title; body = p.Body; }
+
+    void CancelEdit() { editId = null; title = body = imageType = null; image = null; }
+
+    async Task Delete(int id) { await Mediator.Send(new DeletePost(id)); await Load(); }
+
+    async Task SearchText()
+    {
+        if (!string.IsNullOrWhiteSpace(query))
+            posts = await Mediator.Send(new SearchPosts(query, null));
+    }
+
+    async Task HandleKeyup(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+            await SearchText();
+    }
+
+    async Task SearchImage(InputFileChangeEventArgs e) =>
+        posts = await Mediator.Send(new SearchPosts(null, await Read(e.File)));
+}
