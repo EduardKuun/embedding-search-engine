@@ -34,5 +34,12 @@ public class ForumDb(DbContextOptions<ForumDb> options) : DbContext(options)
         // embeddinggemma2 stores multimodal within the same vector space, 
         // so we can use a single column for both text and image embeddings
         b.Entity<PostEmbedding>().Property(e => e.Value).HasColumnType("vector(768)");
+
+        // HNSW index for approximate nearest-neighbour search using cosine distance.
+        b.Entity<PostEmbedding>().HasIndex(e => e.Value)
+            .HasMethod("hnsw")
+            .HasOperators("vector_cosine_ops")
+            .HasStorageParameter("m", 16)
+            .HasStorageParameter("ef_construction", 64);
     }
 }

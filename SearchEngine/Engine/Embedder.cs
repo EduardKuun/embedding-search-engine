@@ -11,7 +11,12 @@ public class Embedder(IEmbeddingGenerator<string, Embedding<float>> generator, H
     public async Task<Vector> Text(string text, bool isQuery = false)
     {
         string input = isQuery ? QueryPrefix + text : text;
-        return new(await generator.GenerateVectorAsync(input));
+        var embedding = await generator.GenerateVectorAsync(input);
+
+        var floats = embedding.ToArray();
+        Normalize(floats);
+
+        return new Vector(floats);
     }
 
     public async Task<Vector> Image(byte[] image, string modelName = "embeddinggemma2", string mediaType = "image/png")
@@ -47,6 +52,25 @@ public class Embedder(IEmbeddingGenerator<string, Embedding<float>> generator, H
             .Select(x => x.GetSingle())
             .ToArray();
 
+        Normalize(floats);
         return new Vector(floats);
+    }
+
+    private static void Normalize(float[] vector)
+    {
+        float sumSquares = 0;
+        for (int i = 0; i < vector.Length; i++)
+        {
+            sumSquares += vector[i] * vector[i];
+        }
+
+        float norm = (float)Math.Sqrt(sumSquares);
+        if (norm > 0)
+        {
+            for (int i = 0; i < vector.Length; i++)
+            {
+                vector[i] /= norm;
+            }
+        }
     }
 }
